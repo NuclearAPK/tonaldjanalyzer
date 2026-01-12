@@ -4,6 +4,7 @@ Track analysis cache using SQLite for persistent storage.
 
 import sqlite3
 import hashlib
+import numpy as np
 from pathlib import Path
 from typing import Optional, Dict, Any
 from contextlib import contextmanager
@@ -54,15 +55,22 @@ class TrackCache:
             """)
             conn.commit()
 
-            # Migration: add bpm_multiplier column if it doesn't exist
-            self._migrate_add_bpm_multiplier(conn)
+            # Migrations
+            self._run_migrations(conn)
 
-    def _migrate_add_bpm_multiplier(self, conn):
-        """Add bpm_multiplier column if it doesn't exist (migration for existing databases)."""
+    def _run_migrations(self, conn):
+        """Run database migrations for new columns."""
         cursor = conn.execute("PRAGMA table_info(track_cache)")
         columns = [row[1] for row in cursor.fetchall()]
+
+        # Migration: add bpm_multiplier column
         if 'bpm_multiplier' not in columns:
             conn.execute("ALTER TABLE track_cache ADD COLUMN bpm_multiplier REAL DEFAULT 1.0")
+            conn.commit()
+
+        # Migration: add embedding column for content-based matching
+        if 'embedding' not in columns:
+            conn.execute("ALTER TABLE track_cache ADD COLUMN embedding BLOB")
             conn.commit()
 
     @contextmanager
@@ -194,6 +202,75 @@ class TrackCache:
                 (multiplier, str(file_path))
             )
             conn.commit()
+
+    def save_embedding(self, file_path: Path, embedding: np.ndarray):
+        """
+        Save audio embedding for content-based matching.
+
+        Args:
+            file_path: Path to the audio file
+            embedding: Embedding vector (numpy array)
+        """
+        file_path = Path(file_path).absolute()
+
+        # Convert numpy array to bytes
+        embedding_bytes = embedding.tobytes() if embedding is not None else None
+
+        with self._get_connection() as conn:
+            conn.execute(
+                """
+                UPDATE track_cache
+                SET embedding = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE file_path = ?
+                """,
+                (embedding_bytes, str(file_path))
+            )
+            conn.commit()
+
+    def get_embedding(self, file_path: Path) -> Optional[np.ndarray]:
+        """
+        Get cached embedding for a file.
+
+        Args:
+            file_path: Path to the audio file
+
+        Returns:
+            Embedding vector or None if not cached
+        """
+        file_path = Path(file_path).absolute()
+
+        with self._get_connection() as conn:
+            cursor = conn.execute(
+                "SELECT embedding FROM track_cache WHERE file_path = ?",
+                (str(file_path),)
+            )
+            row = cursor.fetchone()
+
+            if row and row['embedding']:
+                # Convert bytes back to numpy array (float32, 512-dim)
+                return np.frombuffer(row['embedding'], dtype=np.float32)
+
+        return None
+
+    def get_all_embeddings(self) -> Dict[str, np.ndarray]:
+        """
+        Get all cached embeddings.
+
+        Returns:
+            Dictionary mapping file_path -> embedding
+        """
+        embeddings = {}
+
+        with self._get_connection() as conn:
+            cursor = conn.execute(
+                "SELECT file_path, embedding FROM track_cache WHERE embedding IS NOT NULL"
+            )
+            for row in cursor.fetchall():
+                embeddings[row['file_path']] = np.frombuffer(
+                    row['embedding'], dtype=np.float32
+                )
+
+        return embeddings
 
     def invalidate(self, file_path: Path):
         """

@@ -11,6 +11,7 @@ import librosa
 
 from .camelot import CamelotWheel
 from .metadata import get_metadata_handler
+from .embeddings import get_audio_embeddings
 from ..core.cache import get_cache
 
 
@@ -27,7 +28,8 @@ class AudioAnalyzer:
     NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F',
                   'F#', 'G', 'G#', 'A', 'A#', 'B']
 
-    def __init__(self, sr: int = 22050, use_cache: bool = True, use_metadata: bool = True):
+    def __init__(self, sr: int = 22050, use_cache: bool = True, use_metadata: bool = True,
+                 extract_embeddings: bool = True):
         """
         Initialize the analyzer.
 
@@ -35,12 +37,15 @@ class AudioAnalyzer:
             sr: Sample rate to use for analysis (default 22050 for speed)
             use_cache: Whether to use cached results (default True)
             use_metadata: Whether to read/write MP3 metadata (default True)
+            extract_embeddings: Whether to extract audio embeddings for content matching (default True)
         """
         self.sr = sr
         self.use_cache = use_cache
         self.use_metadata = use_metadata
+        self.extract_embeddings = extract_embeddings
         self._cache = get_cache() if use_cache else None
         self._metadata = get_metadata_handler() if use_metadata else None
+        self._embeddings = get_audio_embeddings() if extract_embeddings else None
 
     def analyze_file(self, file_path: Path, force_reanalyze: bool = False) -> dict:
         """
@@ -51,7 +56,7 @@ class AudioAnalyzer:
             force_reanalyze: If True, ignore cache/metadata and re-analyze
 
         Returns:
-            Dictionary with keys: duration, bpm, key, camelot, error, from_cache, from_metadata
+            Dictionary with keys: duration, bpm, key, camelot, embedding, error, from_cache, from_metadata
         """
         file_path = Path(file_path)
 
@@ -60,8 +65,9 @@ class AudioAnalyzer:
             if self._metadata:
                 metadata = self._metadata.read_metadata(file_path)
                 if metadata:
-                    # Also update cache from metadata
+                    # Try to get cached embedding
                     if self._cache:
+                        metadata['embedding'] = self._cache.get_embedding(file_path)
                         self._cache.save_result(file_path, metadata)
                     return metadata
 
@@ -69,6 +75,8 @@ class AudioAnalyzer:
             if self._cache:
                 cached = self._cache.get_cached_result(file_path)
                 if cached:
+                    # Also try to get cached embedding
+                    cached['embedding'] = self._cache.get_embedding(file_path)
                     return cached
 
         result = {
@@ -76,6 +84,7 @@ class AudioAnalyzer:
             'bpm': None,
             'key': None,
             'camelot': None,
+            'embedding': None,
             'error': None,
             'from_cache': False,
             'from_metadata': False
@@ -111,6 +120,35 @@ class AudioAnalyzer:
             result['error'] = str(e)
 
         return result
+
+    def extract_embedding(self, file_path: Path) -> dict:
+        """
+        Extract audio embedding for a file (separate from main analysis for performance).
+
+        Args:
+            file_path: Path to the audio file
+
+        Returns:
+            Dictionary with embedding or None
+        """
+        file_path = Path(file_path)
+
+        # Check cache first
+        if self._cache:
+            cached_embedding = self._cache.get_embedding(file_path)
+            if cached_embedding is not None:
+                return {'embedding': cached_embedding, 'from_cache': True}
+
+        # Extract new embedding
+        if self._embeddings and self._embeddings.is_available():
+            embedding = self._embeddings.extract_embedding(file_path)
+            if embedding is not None:
+                # Save to cache
+                if self._cache:
+                    self._cache.save_embedding(file_path, embedding)
+                return {'embedding': embedding, 'from_cache': False}
+
+        return {'embedding': None, 'from_cache': False}
 
     def _detect_bpm(self, y: np.ndarray, sr: int) -> Optional[float]:
         """

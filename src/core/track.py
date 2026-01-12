@@ -1,6 +1,7 @@
 from dataclasses import dataclass, field
 from typing import Optional
 from pathlib import Path
+import numpy as np
 
 
 # Available BPM multipliers
@@ -18,7 +19,10 @@ class Track:
     bpm_multiplier: float = 1.0  # BPM multiplier (0.5, 1.0, or 2.0)
     key: Optional[str] = None  # Musical key (e.g., "C major", "A minor")
     camelot: Optional[str] = None  # Camelot notation (e.g., "8A", "9B")
-    compatibility_score: Optional[float] = None  # 0-100
+    compatibility_score: Optional[float] = None  # 0-100 (harmonic + BPM)
+    content_score: Optional[float] = None  # 0-100 (content similarity)
+    combined_score: Optional[float] = None  # 0-100 (overall match)
+    embedding: Optional[np.ndarray] = field(default=None, repr=False)  # Audio embedding
     is_master: bool = False
     is_analyzed: bool = False
     error: Optional[str] = None
@@ -85,7 +89,28 @@ class Track:
             return "--"
         return f"{self.compatibility_score:.0f}%"
 
+    @property
+    def content_str(self) -> str:
+        """Returns content similarity as percentage string."""
+        if self.content_score is None:
+            return "--"
+        return f"{self.content_score:.0f}%"
+
+    @property
+    def combined_str(self) -> str:
+        """Returns combined score as percentage string."""
+        if self.combined_score is None:
+            return "--"
+        return f"{self.combined_score:.0f}%"
+
+    @property
+    def has_embedding(self) -> bool:
+        """Check if embedding is available."""
+        return self.embedding is not None
+
     def reset_compatibility(self):
-        """Reset compatibility score (used when master track changes)."""
+        """Reset compatibility scores (used when master track changes)."""
         self.compatibility_score = None
+        self.content_score = None
+        self.combined_score = None
         self.is_master = False

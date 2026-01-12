@@ -70,8 +70,10 @@ class TrackTable(QTableWidget):
     COL_KEY = 3
     COL_CAMELOT = 4
     COL_COMPAT = 5
+    COL_CONTENT = 6
+    COL_COMBINED = 7
 
-    COLUMNS = ['Name', 'Duration', 'BPM', 'Key', 'Camelot', 'Match']
+    COLUMNS = ['Name', 'Duration', 'BPM', 'Key', 'Camelot', 'Harmonic', 'Content', 'Match']
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -100,6 +102,8 @@ class TrackTable(QTableWidget):
         header.setSectionResizeMode(self.COL_KEY, QHeaderView.ResizeToContents)
         header.setSectionResizeMode(self.COL_CAMELOT, QHeaderView.ResizeToContents)
         header.setSectionResizeMode(self.COL_COMPAT, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(self.COL_CONTENT, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(self.COL_COMBINED, QHeaderView.ResizeToContents)
 
         # Sorting
         self.setSortingEnabled(True)
@@ -144,15 +148,21 @@ class TrackTable(QTableWidget):
         self.setItem(row, self.COL_KEY, QTableWidgetItem(track.key or '--'))
         self.setItem(row, self.COL_CAMELOT, QTableWidgetItem(track.camelot_str))
 
-        # Compatibility column (with custom sorting support)
-        compat_item = CompatibilityTableWidgetItem(
-            track.compatibility_str,
-            track.compatibility_score,
+        # Harmonic compatibility column
+        self.setItem(row, self.COL_COMPAT, QTableWidgetItem(track.compatibility_str))
+
+        # Content similarity column
+        self.setItem(row, self.COL_CONTENT, QTableWidgetItem(track.content_str))
+
+        # Combined Match column (with custom sorting support)
+        combined_item = CompatibilityTableWidgetItem(
+            track.combined_str,
+            track.combined_score,
             track.is_master
         )
-        self.setItem(row, self.COL_COMPAT, compat_item)
+        self.setItem(row, self.COL_COMBINED, combined_item)
 
-        # Set row color based on compatibility
+        # Set row color based on combined score
         self._update_row_color(row, track)
 
     def update_track(self, track: Track):
@@ -166,13 +176,15 @@ class TrackTable(QTableWidget):
         self.item(row, self.COL_BPM).setText(track.bpm_str)
         self.item(row, self.COL_KEY).setText(track.key or '--')
         self.item(row, self.COL_CAMELOT).setText(track.camelot_str)
+        self.item(row, self.COL_COMPAT).setText(track.compatibility_str)
+        self.item(row, self.COL_CONTENT).setText(track.content_str)
 
-        # Update compatibility item with proper sorting data
-        compat_item = self.item(row, self.COL_COMPAT)
-        if isinstance(compat_item, CompatibilityTableWidgetItem):
-            compat_item.update_data(track.compatibility_str, track.compatibility_score, track.is_master)
+        # Update combined item with proper sorting data
+        combined_item = self.item(row, self.COL_COMBINED)
+        if isinstance(combined_item, CompatibilityTableWidgetItem):
+            combined_item.update_data(track.combined_str, track.combined_score, track.is_master)
         else:
-            compat_item.setText(track.compatibility_str)
+            combined_item.setText(track.combined_str)
 
         self._update_row_color(row, track)
 
@@ -181,18 +193,27 @@ class TrackTable(QTableWidget):
         for row in range(self.rowCount()):
             track = self._get_track_at_row(row)
             if track:
-                compat_item = self.item(row, self.COL_COMPAT)
-                if isinstance(compat_item, CompatibilityTableWidgetItem):
-                    compat_item.update_data(track.compatibility_str, track.compatibility_score, track.is_master)
+                # Update harmonic and content scores
+                self.item(row, self.COL_COMPAT).setText(track.compatibility_str)
+                self.item(row, self.COL_CONTENT).setText(track.content_str)
+
+                # Update combined item
+                combined_item = self.item(row, self.COL_COMBINED)
+                if isinstance(combined_item, CompatibilityTableWidgetItem):
+                    combined_item.update_data(track.combined_str, track.combined_score, track.is_master)
                 else:
-                    compat_item.setText(track.compatibility_str)
+                    combined_item.setText(track.combined_str)
+
                 self._update_row_color(row, track)
 
     def _update_row_color(self, row: int, track: Track):
-        """Update row background color based on compatibility score."""
+        """Update row background color based on combined score."""
         if track.is_master:
             color = QColor(*COLORS['master'])
+        elif track.combined_score is not None:
+            color = QColor(*get_color_for_score(track.combined_score))
         elif track.compatibility_score is not None:
+            # Fallback to harmonic score if no content score
             color = QColor(*get_color_for_score(track.compatibility_score))
         else:
             color = QColor(*COLORS['neutral'])
@@ -338,7 +359,7 @@ class TrackTable(QTableWidget):
             self.play_requested.emit(track)
 
     def sort_by_compatibility(self, ascending: bool = None):
-        """Sort tracks by compatibility score. If ascending is None, toggle current order."""
+        """Sort tracks by combined Match score. If ascending is None, toggle current order."""
         if ascending is None:
             # Toggle current order
             self._sort_ascending = not self._sort_ascending
@@ -346,4 +367,4 @@ class TrackTable(QTableWidget):
             self._sort_ascending = ascending
 
         order = Qt.AscendingOrder if self._sort_ascending else Qt.DescendingOrder
-        self.sortByColumn(self.COL_COMPAT, order)
+        self.sortByColumn(self.COL_COMBINED, order)

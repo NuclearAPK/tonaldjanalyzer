@@ -1,7 +1,8 @@
 """
-Compatibility calculator for track matching based on BPM and key.
+Compatibility calculator for track matching based on BPM, key, and content.
 """
 
+import numpy as np
 from typing import Optional, Tuple
 from .track import Track
 from ..audio.camelot import CamelotWheel
@@ -9,30 +10,41 @@ from ..audio.camelot import CamelotWheel
 
 class CompatibilityCalculator:
     """
-    Calculates compatibility scores between tracks based on BPM and key.
+    Calculates compatibility scores between tracks based on BPM, key, and content.
 
-    Formula: score = key_weight * key_score + bpm_weight * bpm_score
+    Formula:
+    - Harmonic score = key_weight * key_score + bpm_weight * bpm_score
+    - Combined score = harmonic_weight * harmonic_score + content_weight * content_score
     """
 
-    # Default weights
+    # Default weights for harmonic compatibility
     KEY_WEIGHT = 0.6
     BPM_WEIGHT = 0.4
+
+    # Default weights for combined score
+    HARMONIC_WEIGHT = 0.5
+    CONTENT_WEIGHT = 0.5
 
     # BPM tolerance thresholds
     BPM_PERFECT_THRESHOLD = 0.02  # 2% - perfect match
     BPM_GOOD_THRESHOLD = 0.06    # 6% - still mixable
     BPM_MAX_THRESHOLD = 0.10    # 10% - maximum useful range
 
-    def __init__(self, key_weight: float = 0.6, bpm_weight: float = 0.4):
+    def __init__(self, key_weight: float = 0.6, bpm_weight: float = 0.4,
+                 harmonic_weight: float = 0.5, content_weight: float = 0.5):
         """
         Initialize calculator with custom weights.
 
         Args:
             key_weight: Weight for key compatibility (0-1)
             bpm_weight: Weight for BPM compatibility (0-1)
+            harmonic_weight: Weight for harmonic score in combined (0-1)
+            content_weight: Weight for content score in combined (0-1)
         """
         self.key_weight = key_weight
         self.bpm_weight = bpm_weight
+        self.harmonic_weight = harmonic_weight
+        self.content_weight = content_weight
 
     def calculate_bpm_score(self, bpm1: float, bpm2: float) -> float:
         """
@@ -123,6 +135,48 @@ class CompatibilityCalculator:
 
         return round(total, 1)
 
+    def calculate_content_score(self, embedding1: np.ndarray, embedding2: np.ndarray) -> float:
+        """
+        Calculate content similarity score using embeddings.
+
+        Args:
+            embedding1: First track embedding
+            embedding2: Second track embedding
+
+        Returns:
+            Score from 0 to 100
+        """
+        if embedding1 is None or embedding2 is None:
+            return None
+
+        # Cosine similarity (embeddings should be normalized)
+        similarity = np.dot(embedding1, embedding2)
+
+        # Convert to 0-100 scale
+        score = max(0, similarity) * 100
+
+        return round(score, 1)
+
+    def calculate_combined_score(self, harmonic_score: float, content_score: float) -> float:
+        """
+        Calculate combined score from harmonic and content scores.
+
+        Args:
+            harmonic_score: Key/BPM compatibility score (0-100)
+            content_score: Content similarity score (0-100) or None
+
+        Returns:
+            Combined score (0-100)
+        """
+        if content_score is None:
+            # If no content score, use only harmonic
+            return harmonic_score
+
+        combined = (self.harmonic_weight * harmonic_score +
+                   self.content_weight * content_score)
+
+        return round(combined, 1)
+
     def update_track_compatibility(self, master: Track, tracks: list):
         """
         Update compatibility scores for all tracks relative to master.
@@ -134,10 +188,24 @@ class CompatibilityCalculator:
         for track in tracks:
             if track == master or track.file_path == master.file_path:
                 track.compatibility_score = None
+                track.content_score = None
+                track.combined_score = None
                 track.is_master = True
             else:
                 track.is_master = False
+
+                # Calculate harmonic compatibility (key + BPM)
                 track.compatibility_score = self.calculate_compatibility(master, track)
+
+                # Calculate content similarity if embeddings available
+                track.content_score = self.calculate_content_score(
+                    master.embedding, track.embedding
+                )
+
+                # Calculate combined score
+                track.combined_score = self.calculate_combined_score(
+                    track.compatibility_score, track.content_score
+                )
 
     @staticmethod
     def get_compatibility_color(score: Optional[float]) -> Tuple[int, int, int]:

@@ -34,7 +34,7 @@ class AnalysisWorker(QThread):
         super().__init__(parent)
         self._tracks = tracks
         self._force_reanalyze = force_reanalyze
-        self._analyzer = AudioAnalyzer()
+        self._analyzer = AudioAnalyzer(extract_embeddings=False)  # Don't extract embeddings during basic analysis
 
     def run(self):
         """Analyze tracks in background."""
@@ -51,6 +51,37 @@ class AnalysisWorker(QThread):
         self.finished.emit()
 
 
+class EmbeddingWorker(QThread):
+    """Background worker for extracting audio embeddings."""
+
+    progress = pyqtSignal(int, int)  # completed, total
+    embedding_extracted = pyqtSignal(object, object)  # track, embedding
+    finished = pyqtSignal()
+    status = pyqtSignal(str)  # status message
+
+    def __init__(self, tracks: List[Track], parent=None):
+        super().__init__(parent)
+        self._tracks = tracks
+        self._analyzer = AudioAnalyzer()
+
+    def run(self):
+        """Extract embeddings for tracks in background."""
+        total = len(self._tracks)
+
+        self.status.emit("Loading AI model (first time may take a while)...")
+
+        for i, track in enumerate(self._tracks):
+            if self.isInterruptionRequested():
+                break
+
+            self.status.emit(f"Extracting content features: {i + 1}/{total}")
+            result = self._analyzer.extract_embedding(track.file_path)
+            self.embedding_extracted.emit(track, result.get('embedding'))
+            self.progress.emit(i + 1, total)
+
+        self.finished.emit()
+
+
 class MainWindow(QMainWindow):
     """Main application window."""
 
@@ -60,6 +91,7 @@ class MainWindow(QMainWindow):
         self._master_track: Optional[Track] = None
         self._compatibility_calc = CompatibilityCalculator()
         self._analysis_worker: Optional[AnalysisWorker] = None
+        self._embedding_worker: Optional[EmbeddingWorker] = None
 
         self._setup_ui()
         self._connect_signals()
@@ -105,6 +137,14 @@ class MainWindow(QMainWindow):
         self._sort_button.clicked.connect(self._on_sort_by_compatibility)
         self._sort_button.setEnabled(False)
         header_layout.addWidget(self._sort_button)
+
+        header_layout.addSpacing(20)
+
+        self._content_button = QPushButton("Analyze Content (AI)")
+        self._content_button.setToolTip("Extract audio features using AI for content-based matching")
+        self._content_button.clicked.connect(self._on_analyze_content)
+        self._content_button.setEnabled(False)
+        header_layout.addWidget(self._content_button)
 
         header_layout.addStretch()
 
@@ -252,7 +292,8 @@ class MainWindow(QMainWindow):
         self._reanalyze_button.setEnabled(len(self._tracks) > 0)
         self._master_button.setEnabled(len(self._tracks) > 0)
         self._sort_button.setEnabled(self._master_track is not None)
-        self._status_label.setText("Analysis complete")
+        self._content_button.setEnabled(len(self._tracks) > 0)
+        self._status_label.setText("Analysis complete. Click 'Analyze Content (AI)' for content-based matching.")
 
     def _on_reanalyze_all(self):
         """Force re-analyze all tracks (ignore cache)."""
@@ -267,6 +308,71 @@ class MainWindow(QMainWindow):
         )
         if reply == QMessageBox.Yes:
             self._start_analysis(self._tracks, force_reanalyze=True)
+
+    def _on_analyze_content(self):
+        """Extract content features using AI for all tracks."""
+        if not self._tracks:
+            return
+
+        # Check which tracks need embedding extraction
+        tracks_to_process = [t for t in self._tracks if t.embedding is None]
+
+        if not tracks_to_process:
+            QMessageBox.information(
+                self,
+                "Content Analysis",
+                "All tracks already have content features extracted."
+            )
+            return
+
+        self._start_embedding_extraction(tracks_to_process)
+
+    def _start_embedding_extraction(self, tracks: List[Track]):
+        """Start background embedding extraction."""
+        if self._embedding_worker and self._embedding_worker.isRunning():
+            self._embedding_worker.requestInterruption()
+            self._embedding_worker.wait()
+
+        self._progress_bar.setVisible(True)
+        self._progress_bar.setValue(0)
+        self._load_button.setEnabled(False)
+        self._content_button.setEnabled(False)
+        self._status_label.setText("Loading AI model...")
+
+        self._embedding_worker = EmbeddingWorker(tracks)
+        self._embedding_worker.progress.connect(self._on_embedding_progress)
+        self._embedding_worker.embedding_extracted.connect(self._on_embedding_extracted)
+        self._embedding_worker.finished.connect(self._on_embedding_finished)
+        self._embedding_worker.status.connect(self._on_embedding_status)
+        self._embedding_worker.start()
+
+    def _on_embedding_progress(self, completed: int, total: int):
+        """Update progress bar for embedding extraction."""
+        self._progress_bar.setMaximum(total)
+        self._progress_bar.setValue(completed)
+
+    def _on_embedding_status(self, status: str):
+        """Update status label during embedding extraction."""
+        self._status_label.setText(status)
+
+    def _on_embedding_extracted(self, track: Track, embedding):
+        """Handle single track embedding extraction complete."""
+        track.embedding = embedding
+
+        # Update compatibility if master is set
+        if self._master_track:
+            self._update_compatibility()
+            self._track_table.update_track(track)
+
+    def _on_embedding_finished(self):
+        """Handle all embedding extraction complete."""
+        self._progress_bar.setVisible(False)
+        self._load_button.setEnabled(True)
+        self._content_button.setEnabled(True)
+
+        # Count how many tracks have embeddings
+        with_embeddings = sum(1 for t in self._tracks if t.embedding is not None)
+        self._status_label.setText(f"Content analysis complete. {with_embeddings}/{len(self._tracks)} tracks analyzed.")
 
     def _on_reanalyze_track(self, track: Track):
         """Force re-analyze a single track (ignore cache)."""
@@ -354,6 +460,7 @@ class MainWindow(QMainWindow):
                 self._sort_button.setEnabled(False)
                 self._export_button.setEnabled(False)
                 self._reanalyze_button.setEnabled(False)
+                self._content_button.setEnabled(False)
                 self._status_label.setText("All tracks cleared")
 
     def _on_export_csv(self):
@@ -372,7 +479,7 @@ class MainWindow(QMainWindow):
             try:
                 with open(file_path, 'w', newline='', encoding='utf-8') as f:
                     writer = csv.writer(f)
-                    writer.writerow(['Filename', 'Duration', 'Original BPM', 'BPM Multiplier', 'Effective BPM', 'Key', 'Camelot', 'Match %', 'Is Master'])
+                    writer.writerow(['Filename', 'Duration', 'Original BPM', 'BPM Multiplier', 'Effective BPM', 'Key', 'Camelot', 'Harmonic %', 'Content %', 'Match %', 'Is Master'])
 
                     for track in self._tracks:
                         writer.writerow([
@@ -384,6 +491,8 @@ class MainWindow(QMainWindow):
                             track.key or '',
                             track.camelot_str,
                             track.compatibility_str,
+                            track.content_str,
+                            track.combined_str,
                             'Yes' if track.is_master else 'No'
                         ])
 
@@ -419,6 +528,11 @@ class MainWindow(QMainWindow):
         if self._analysis_worker and self._analysis_worker.isRunning():
             self._analysis_worker.requestInterruption()
             self._analysis_worker.wait()
+
+        # Stop embedding extraction if running
+        if self._embedding_worker and self._embedding_worker.isRunning():
+            self._embedding_worker.requestInterruption()
+            self._embedding_worker.wait()
 
         # Clean up player
         self._player_widget.cleanup()
