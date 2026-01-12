@@ -294,11 +294,8 @@ class MainWindow(QMainWindow):
             self._reanalyze_button.setEnabled(False)
 
     def _on_track_selected(self, track: Track):
-        """Handle track selection - auto-play the selected track."""
+        """Handle track selection."""
         self._master_button.setEnabled(True)
-        # Auto-play selected track with position reset
-        if track.is_analyzed:
-            self._player_widget.load_track(track, auto_play=True)
 
     def _on_set_master(self):
         """Set selected track as master."""
@@ -336,8 +333,8 @@ class MainWindow(QMainWindow):
         self._track_table.sort_by_compatibility()
 
     def _on_play_track(self, track: Track):
-        """Play a track."""
-        self._player_widget.load_track(track)
+        """Play a track (double-click) - reset position and auto-play."""
+        self._player_widget.load_track(track, auto_play=True)
 
     def _on_clear_tracks(self):
         """Clear all tracks."""
