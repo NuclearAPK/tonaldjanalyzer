@@ -149,6 +149,7 @@ class MainWindow(QMainWindow):
         self._track_table.play_requested.connect(self._on_play_track)
         self._track_table.bpm_multiplier_changed.connect(self._on_bpm_multiplier_changed)
         self._track_table.reanalyze_requested.connect(self._on_reanalyze_track)
+        self._track_table.track_removed.connect(self._on_track_removed)
 
     def _on_bpm_multiplier_changed(self, track):
         """Handle BPM multiplier change - save to cache and recalculate compatibility."""
@@ -271,9 +272,33 @@ class MainWindow(QMainWindow):
         """Force re-analyze a single track (ignore cache)."""
         self._start_analysis([track], force_reanalyze=True)
 
+    def _on_track_removed(self, track: Track):
+        """Handle track removal."""
+        # Remove from internal list
+        if track in self._tracks:
+            self._tracks.remove(track)
+
+        # If removed track was master, clear master
+        if self._master_track == track:
+            self._master_track = None
+            self._sort_button.setEnabled(False)
+            self._status_label.setText("Master track removed")
+
+        # Update UI
+        self._update_track_count()
+
+        # Update button states
+        if not self._tracks:
+            self._master_button.setEnabled(False)
+            self._export_button.setEnabled(False)
+            self._reanalyze_button.setEnabled(False)
+
     def _on_track_selected(self, track: Track):
-        """Handle track selection."""
+        """Handle track selection - auto-play the selected track."""
         self._master_button.setEnabled(True)
+        # Auto-play selected track with position reset
+        if track.is_analyzed:
+            self._player_widget.load_track(track, auto_play=True)
 
     def _on_set_master(self):
         """Set selected track as master."""

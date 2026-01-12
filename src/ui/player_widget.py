@@ -108,17 +108,34 @@ class PlayerWidget(QWidget):
 
         self._player.set_end_callback(self._on_playback_ended)
 
-    def load_track(self, track: Track):
+    def load_track(self, track: Track, auto_play: bool = False):
         """Load a track for playback."""
+        # Stop current playback first
+        if self._player.is_playing():
+            self._player.stop()
+            self._timer.stop()
+
         self._current_track = track
         self._duration = track.duration
+
+        # Reset position
+        self._progress_slider.setValue(0)
+        self._update_time_display(0)
 
         if self._player.load(track.file_path):
             self._track_label.setText(track.filename)
             self._progress_slider.setEnabled(True)
             self._play_button.setEnabled(True)
             self._stop_button.setEnabled(True)
-            self._update_time_display(0)
+
+            # Auto-play if requested
+            if auto_play:
+                self._player.play()
+                self._play_button.setIcon(self.style().standardIcon(QStyle.SP_MediaPause))
+                self._timer.start()
+                self.playback_started.emit()
+            else:
+                self._play_button.setIcon(self.style().standardIcon(QStyle.SP_MediaPlay))
         else:
             self._track_label.setText("Failed to load track")
             self._progress_slider.setEnabled(False)

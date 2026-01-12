@@ -10,7 +10,7 @@ from PyQt5.QtWidgets import (
     QAbstractItemView, QMenu, QAction
 )
 from PyQt5.QtCore import Qt, pyqtSignal
-from PyQt5.QtGui import QColor, QBrush
+from PyQt5.QtGui import QColor, QBrush, QKeyEvent
 
 
 class CompatibilityTableWidgetItem(QTableWidgetItem):
@@ -61,6 +61,7 @@ class TrackTable(QTableWidget):
     play_requested = pyqtSignal(Track)
     bpm_multiplier_changed = pyqtSignal(Track)  # Emitted when BPM multiplier changes
     reanalyze_requested = pyqtSignal(Track)  # Emitted when reanalyze is requested
+    track_removed = pyqtSignal(Track)  # Emitted when track is removed
 
     # Column indices
     COL_NAME = 0
@@ -244,6 +245,14 @@ class TrackTable(QTableWidget):
             if row >= 0:
                 self.removeRow(row)
                 self._tracks.remove(track)
+                self.track_removed.emit(track)
+
+    def keyPressEvent(self, event: QKeyEvent):
+        """Handle key press events."""
+        if event.key() == Qt.Key_Delete:
+            self.remove_selected_track()
+        else:
+            super().keyPressEvent(event)
 
     def _show_context_menu(self, position):
         """Show context menu for track actions."""
