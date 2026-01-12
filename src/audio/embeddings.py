@@ -6,6 +6,8 @@ import numpy as np
 from pathlib import Path
 from typing import Optional, List
 import warnings
+import os
+import sys
 
 # Suppress warnings during model loading
 warnings.filterwarnings('ignore', category=UserWarning)
@@ -15,53 +17,87 @@ _model = None
 _processor = None
 _model_loaded = False
 _model_available = True
+_load_error = None
+
+
+def _fix_windows_dll_path():
+    """Fix DLL loading issues on Windows by adding torch lib to DLL search path."""
+    if sys.platform != 'win32':
+        return
+
+    try:
+        import importlib.util
+
+        # Find torch package location
+        torch_spec = importlib.util.find_spec('torch')
+        if torch_spec and torch_spec.origin:
+            torch_path = Path(torch_spec.origin).parent
+            lib_path = torch_path / 'lib'
+
+            if lib_path.exists():
+                # Add to DLL search path (Windows 8+)
+                if hasattr(os, 'add_dll_directory'):
+                    os.add_dll_directory(str(lib_path))
+
+                # Also add to PATH as fallback
+                current_path = os.environ.get('PATH', '')
+                if str(lib_path) not in current_path:
+                    os.environ['PATH'] = str(lib_path) + os.pathsep + current_path
+    except Exception:
+        pass  # Silently ignore if fix fails
 
 
 def _load_model():
     """Lazy load CLAP model on first use."""
-    global _model, _processor, _model_loaded, _model_available
+    global _model, _processor, _model_loaded, _model_available, _load_error
 
     if _model_loaded:
         return _model_available
 
+    _model_loaded = True  # Mark as attempted even if it fails
+
     try:
-        from transformers import ClapModel, ClapProcessor
+        # Set environment variable to help with DLL loading on Windows
+        os.environ.setdefault('KMP_DUPLICATE_LIB_OK', 'TRUE')
+
+        # Fix Windows DLL path before importing torch
+        _fix_windows_dll_path()
+
+        # Import torch after DLL path fix
         import torch
+
+        from transformers import ClapModel, ClapProcessor
 
         print("Loading CLAP model (first time may take a while)...")
 
-        # Use smaller CLAP model
-        model_name = "laion/smaller-clap-htsat-unfused"
+        model_name = "laion/clap-htsat-unfused"
 
-        try:
-            _processor = ClapProcessor.from_pretrained(model_name)
-            _model = ClapModel.from_pretrained(model_name)
-            _model.eval()
+        _processor = ClapProcessor.from_pretrained(model_name)
+        _model = ClapModel.from_pretrained(model_name)
+        _model.eval()
 
-            # Use CPU for compatibility
-            _model = _model.to('cpu')
+        # Use CPU for compatibility
+        _model = _model.to('cpu')
 
-            print("CLAP model loaded successfully")
-            _model_available = True
-        except Exception as e:
-            # Fallback to larger model if smaller not available
-            print(f"Smaller model not available, trying standard model...")
-            model_name = "laion/clap-htsat-unfused"
-            _processor = ClapProcessor.from_pretrained(model_name)
-            _model = ClapModel.from_pretrained(model_name)
-            _model.eval()
-            _model = _model.to('cpu')
-            _model_available = True
+        print("CLAP model loaded successfully")
+        _model_available = True
+        return True
 
     except ImportError as e:
-        print(f"CLAP dependencies not available: {e}")
+        _load_error = f"CLAP dependencies not available: {e}"
+        print(_load_error)
         _model_available = False
     except Exception as e:
-        print(f"Failed to load CLAP model: {e}")
+        _load_error = f"Failed to load CLAP model: {e}"
+        print(_load_error)
         _model_available = False
 
-    _model_loaded = True
     return _model_available
+
+
+def get_load_error() -> Optional[str]:
+    """Get the error message if model loading failed."""
+    return _load_error
 
 
 class AudioEmbeddings:
@@ -95,7 +131,6 @@ class AudioEmbeddings:
             return None
 
         try:
-            import torch
             import librosa
 
             # Load audio if not provided
@@ -111,9 +146,11 @@ class AudioEmbeddings:
                 start = (len(audio_data) - target_length) // 2
                 audio_data = audio_data[start:start + target_length]
 
-            # Process audio
+            # Process audio using loaded model
+            import torch
+
             inputs = _processor(
-                audios=audio_data,
+                audio=audio_data,
                 sampling_rate=48000,
                 return_tensors="pt"
             )
