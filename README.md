@@ -4,6 +4,8 @@
 
 A desktop application for DJs that analyzes audio tracks and finds compatible matches based on musical key (Camelot Wheel notation) and BPM for seamless mixing.
 
+![Tonal DJ Screenshot](assets/main.png)
+
 ## Features
 
 - **BPM Detection** - Automatic tempo detection using beat tracking
