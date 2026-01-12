@@ -61,6 +61,7 @@ class TrackTable(QTableWidget):
     play_requested = pyqtSignal(Track)
     bpm_multiplier_changed = pyqtSignal(Track)  # Emitted when BPM multiplier changes
     reanalyze_requested = pyqtSignal(Track)  # Emitted when reanalyze is requested
+    content_analyze_requested = pyqtSignal(Track)  # Emitted when AI content analysis is requested
     track_removed = pyqtSignal(Track)  # Emitted when track is removed
 
     # Column indices
@@ -297,6 +298,15 @@ class TrackTable(QTableWidget):
         reanalyze_action = QAction("Reanalyze Track", self)
         reanalyze_action.triggered.connect(lambda: self.reanalyze_requested.emit(track))
         menu.addAction(reanalyze_action)
+
+        # AI Content Analysis
+        if track.has_embedding:
+            content_action = QAction("✓ Content Analyzed (AI)", self)
+            content_action.setEnabled(False)
+        else:
+            content_action = QAction("Analyze Content (AI)", self)
+            content_action.triggered.connect(lambda: self.content_analyze_requested.emit(track))
+        menu.addAction(content_action)
 
         menu.addSeparator()
 

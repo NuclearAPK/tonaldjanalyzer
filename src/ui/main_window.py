@@ -189,6 +189,7 @@ class MainWindow(QMainWindow):
         self._track_table.play_requested.connect(self._on_play_track)
         self._track_table.bpm_multiplier_changed.connect(self._on_bpm_multiplier_changed)
         self._track_table.reanalyze_requested.connect(self._on_reanalyze_track)
+        self._track_table.content_analyze_requested.connect(self._on_content_analyze_track)
         self._track_table.track_removed.connect(self._on_track_removed)
 
     def _on_bpm_multiplier_changed(self, track):
@@ -377,6 +378,15 @@ class MainWindow(QMainWindow):
     def _on_reanalyze_track(self, track: Track):
         """Force re-analyze a single track (ignore cache)."""
         self._start_analysis([track], force_reanalyze=True)
+
+    def _on_content_analyze_track(self, track: Track):
+        """Analyze AI content for a single track."""
+        if self._embedding_worker and self._embedding_worker.isRunning():
+            self._status_label.setText("Content analysis already in progress...")
+            return
+
+        self._status_label.setText(f"Analyzing content: {track.filename}...")
+        self._start_embedding_extraction([track])
 
     def _on_track_removed(self, track: Track):
         """Handle track removal."""
