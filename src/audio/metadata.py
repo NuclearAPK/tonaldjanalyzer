@@ -8,7 +8,7 @@ from typing import Optional, Dict, Any
 
 try:
     from mutagen.mp3 import MP3
-    from mutagen.id3 import ID3, TXXX, TIT2, TBPM, TKEY
+    from mutagen.id3 import ID3, TXXX, TIT2, TBPM, TKEY, TCON
     MUTAGEN_AVAILABLE = True
 except ImportError:
     MUTAGEN_AVAILABLE = False
@@ -150,6 +150,39 @@ class MetadataHandler:
             del tags[frame_id]
         # Add new frame
         tags.add(TXXX(encoding=3, desc=description, text=[value]))
+
+    def read_genre(self, file_path: Path) -> Optional[str]:
+        """
+        Read genre from MP3 metadata (TCON tag).
+
+        Args:
+            file_path: Path to the MP3 file
+
+        Returns:
+            Genre string or None if not found
+        """
+        if not MUTAGEN_AVAILABLE:
+            return None
+
+        if not self.is_mp3(file_path):
+            return None
+
+        try:
+            audio = MP3(str(file_path))
+
+            if audio.tags is None:
+                return None
+
+            # Read TCON (Content Type / Genre) tag
+            if 'TCON' in audio.tags:
+                genre = audio.tags['TCON']
+                if genre.text:
+                    return str(genre.text[0])
+
+            return None
+
+        except Exception:
+            return None
 
 
 # Global instance

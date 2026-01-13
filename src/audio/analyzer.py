@@ -13,6 +13,7 @@ from .camelot import CamelotWheel
 from .metadata import get_metadata_handler
 from .embeddings import get_audio_embeddings
 from ..core.cache import get_cache
+from ..core.settings import get_settings
 
 
 class AudioAnalyzer:
@@ -65,9 +66,10 @@ class AudioAnalyzer:
             if self._metadata:
                 metadata = self._metadata.read_metadata(file_path)
                 if metadata:
-                    # Try to get cached embedding
+                    # Try to get cached embedding and style
                     if self._cache:
                         metadata['embedding'] = self._cache.get_embedding(file_path)
+                        metadata['style'] = self._cache.get_style(file_path)
                         self._cache.save_result(file_path, metadata)
                     return metadata
 
@@ -75,8 +77,9 @@ class AudioAnalyzer:
             if self._cache:
                 cached = self._cache.get_cached_result(file_path)
                 if cached:
-                    # Also try to get cached embedding
+                    # Also try to get cached embedding and style
                     cached['embedding'] = self._cache.get_embedding(file_path)
+                    cached['style'] = self._cache.get_style(file_path)
                     return cached
 
         result = {
@@ -112,43 +115,96 @@ class AudioAnalyzer:
             if self._cache and not result['error']:
                 self._cache.save_result(file_path, result)
 
-            # Write to MP3 metadata (for MP3 files)
+            # Write to MP3 metadata (for MP3 files) - only if enabled in settings
             if self._metadata and not result['error']:
-                self._metadata.write_metadata(file_path, result)
+                settings = get_settings()
+                if settings.get_write_metadata_enabled():
+                    self._metadata.write_metadata(file_path, result)
 
         except Exception as e:
             result['error'] = str(e)
 
         return result
 
-    def extract_embedding(self, file_path: Path) -> dict:
+    def extract_embedding(self, file_path: Path, bpm: float = None) -> dict:
         """
-        Extract audio embedding for a file (separate from main analysis for performance).
+        Extract audio embedding and classify style for a file.
+        Uses genre from metadata if available, AI only classifies mood.
 
         Args:
             file_path: Path to the audio file
+            bpm: Track BPM for genre correction (optional)
 
         Returns:
-            Dictionary with embedding or None
+            Dictionary with embedding, genre, mood, genre_from_metadata
         """
         file_path = Path(file_path)
+        result = {
+            'embedding': None,
+            'genre': None,
+            'mood': None,
+            'genre_from_metadata': False,
+            'from_cache': False
+        }
 
-        # Check cache first
+        # Read genre from metadata first
+        metadata_genre = None
+        if self._metadata:
+            metadata_genre = self._metadata.read_genre(file_path)
+            if metadata_genre:
+                result['genre'] = metadata_genre
+                result['genre_from_metadata'] = True
+
+        # Check cache first for embedding
         if self._cache:
             cached_embedding = self._cache.get_embedding(file_path)
+            cached_style = self._cache.get_style(file_path)
             if cached_embedding is not None:
-                return {'embedding': cached_embedding, 'from_cache': True}
+                result['embedding'] = cached_embedding
+                # Parse cached style into genre/mood
+                if cached_style and " / " in cached_style:
+                    parts = cached_style.split(" / ", 1)
+                    if not result['genre_from_metadata']:
+                        result['genre'] = parts[0]
+                    result['mood'] = parts[1]
+                elif cached_style and not result['genre_from_metadata']:
+                    result['genre'] = cached_style
+                result['from_cache'] = True
+                return result
 
-        # Extract new embedding
+        # Extract new embedding and classify style
         if self._embeddings and self._embeddings.is_available():
             embedding = self._embeddings.extract_embedding(file_path)
             if embedding is not None:
+                result['embedding'] = embedding
+
+                # Classify style - mood only if genre from metadata, otherwise both
+                if metadata_genre:
+                    # Only classify mood
+                    style_info = self._embeddings.classify_mood(file_path)
+                    if style_info:
+                        result['mood'] = style_info.get('mood')
+                else:
+                    # Classify both genre and mood (pass BPM for genre correction)
+                    style_info = self._embeddings.classify_style(file_path, bpm=bpm)
+                    if style_info:
+                        result['genre'] = style_info.get('genre')
+                        result['mood'] = style_info.get('mood')
+
+                # Build style string for cache
+                style_str = None
+                if result['genre'] and result['mood']:
+                    style_str = f"{result['genre']} / {result['mood']}"
+                elif result['genre']:
+                    style_str = result['genre']
+
                 # Save to cache
                 if self._cache:
                     self._cache.save_embedding(file_path, embedding)
-                return {'embedding': embedding, 'from_cache': False}
+                    if style_str:
+                        self._cache.save_style(file_path, style_str)
 
-        return {'embedding': None, 'from_cache': False}
+        return result
 
     def _detect_bpm(self, y: np.ndarray, sr: int) -> Optional[float]:
         """

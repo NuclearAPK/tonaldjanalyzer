@@ -149,13 +149,17 @@ class CompatibilityCalculator:
         if embedding1 is None or embedding2 is None:
             return None
 
-        # Cosine similarity (embeddings should be normalized)
-        similarity = np.dot(embedding1, embedding2)
+        try:
+            # Cosine similarity (embeddings should be normalized)
+            similarity = float(np.dot(embedding1, embedding2))
 
-        # Convert to 0-100 scale
-        score = max(0, similarity) * 100
+            # Convert to 0-100 scale
+            score = max(0.0, similarity) * 100.0
 
-        return round(score, 1)
+            return round(score, 1)
+        except Exception as e:
+            print(f"[Compatibility] Error calculating content score: {e}", flush=True)
+            return None
 
     def calculate_combined_score(self, harmonic_score: float, content_score: float) -> float:
         """

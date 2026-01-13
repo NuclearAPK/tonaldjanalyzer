@@ -13,6 +13,7 @@ from PyQt5.QtCore import Qt, QTimer, pyqtSignal
 
 from ..audio.player import AudioPlayer
 from ..core.track import Track
+from ..core.localization import tr
 
 
 class PlayerWidget(QWidget):
@@ -20,16 +21,22 @@ class PlayerWidget(QWidget):
 
     playback_started = pyqtSignal()
     playback_stopped = pyqtSignal()
+    track_finished = pyqtSignal(Track)  # Emitted when track ends naturally (for auto-play)
+    _playback_ended_signal = pyqtSignal()  # Internal signal for thread-safe callback
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._player = AudioPlayer()
         self._current_track: Optional[Track] = None
         self._duration = 0.0
+        self._track_ended = False  # Flag to track if playback finished naturally
 
         self._setup_ui()
         self._setup_timer()
         self._connect_signals()
+
+        # Connect internal signal for thread-safe playback end handling
+        self._playback_ended_signal.connect(self._on_playback_ended, Qt.QueuedConnection)
 
     def _setup_ui(self):
         """Create UI elements."""
@@ -39,7 +46,7 @@ class PlayerWidget(QWidget):
         # Track info
         info_layout = QHBoxLayout()
 
-        self._track_label = QLabel("No track loaded")
+        self._track_label = QLabel(tr('no_track_loaded'))
         self._track_label.setObjectName("titleLabel")
         info_layout.addWidget(self._track_label)
 
@@ -78,7 +85,7 @@ class PlayerWidget(QWidget):
         controls_layout.addSpacing(20)
 
         # Volume
-        volume_label = QLabel("Volume:")
+        volume_label = QLabel(tr('volume'))
         controls_layout.addWidget(volume_label)
 
         self._volume_slider = QSlider(Qt.Horizontal)
@@ -106,7 +113,8 @@ class PlayerWidget(QWidget):
         self._progress_slider.sliderPressed.connect(self._on_slider_pressed)
         self._progress_slider.sliderReleased.connect(self._on_slider_released)
 
-        self._player.set_end_callback(self._on_playback_ended)
+        # Use signal emission for thread-safe callback from audio player
+        self._player.set_end_callback(lambda: self._playback_ended_signal.emit())
 
     def load_track(self, track: Track, auto_play: bool = False):
         """Load a track for playback."""
@@ -117,6 +125,7 @@ class PlayerWidget(QWidget):
 
         self._current_track = track
         self._duration = track.duration
+        self._track_ended = False  # Reset ended flag for new track
 
         # Reset position
         self._progress_slider.setValue(0)
@@ -137,7 +146,7 @@ class PlayerWidget(QWidget):
             else:
                 self._play_button.setIcon(self.style().standardIcon(QStyle.SP_MediaPlay))
         else:
-            self._track_label.setText("Failed to load track")
+            self._track_label.setText(tr('failed_to_load'))
             self._progress_slider.setEnabled(False)
             self._play_button.setEnabled(False)
             self._stop_button.setEnabled(False)
@@ -149,6 +158,10 @@ class PlayerWidget(QWidget):
             self._play_button.setIcon(self.style().standardIcon(QStyle.SP_MediaPlay))
             self._timer.stop()
         else:
+            # If track ended, reload from beginning
+            if self._track_ended and self._current_track:
+                self._player.load(self._current_track.file_path)
+                self._track_ended = False
             self._player.play()
             self._play_button.setIcon(self.style().standardIcon(QStyle.SP_MediaPause))
             self._timer.start()
@@ -209,12 +222,16 @@ class PlayerWidget(QWidget):
         return f"{minutes}:{secs:02d}"
 
     def _on_playback_ended(self):
-        """Handle playback end."""
+        """Handle playback end (track finished naturally)."""
+        self._track_ended = True  # Mark track as ended for replay handling
         self._play_button.setIcon(self.style().standardIcon(QStyle.SP_MediaPlay))
         self._timer.stop()
         self._progress_slider.setValue(0)
         self._update_time_display(0)
         self.playback_stopped.emit()
+        # Emit track_finished for auto-play feature
+        if self._current_track:
+            self.track_finished.emit(self._current_track)
 
     def cleanup(self):
         """Clean up resources."""

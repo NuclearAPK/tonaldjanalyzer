@@ -49,6 +49,7 @@ class CompatibilityTableWidgetItem(QTableWidgetItem):
         self._is_master = is_master
 
 from ..core.track import Track
+from ..core.localization import tr
 from .styles import get_color_for_score, COLORS
 
 
@@ -63,6 +64,7 @@ class TrackTable(QTableWidget):
     reanalyze_requested = pyqtSignal(Track)  # Emitted when reanalyze is requested
     content_analyze_requested = pyqtSignal(Track)  # Emitted when AI content analysis is requested
     track_removed = pyqtSignal(Track)  # Emitted when track is removed
+    edit_metadata_requested = pyqtSignal(Track)  # Emitted when metadata editing is requested
 
     # Column indices
     COL_NAME = 0
@@ -70,11 +72,13 @@ class TrackTable(QTableWidget):
     COL_BPM = 2
     COL_KEY = 3
     COL_CAMELOT = 4
-    COL_COMPAT = 5
-    COL_CONTENT = 6
-    COL_COMBINED = 7
+    COL_AI = 5
+    COL_STYLE = 6
+    COL_COMPAT = 7
+    COL_CONTENT = 8
+    COL_COMBINED = 9
 
-    COLUMNS = ['Name', 'Duration', 'BPM', 'Key', 'Camelot', 'Harmonic', 'Content', 'Match']
+    COLUMN_COUNT = 10
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -82,11 +86,20 @@ class TrackTable(QTableWidget):
         self._sort_ascending: bool = False  # Track current sort order
         self._setup_table()
 
+    def _get_column_headers(self):
+        """Get translated column headers."""
+        return [
+            tr('col_name'), tr('col_duration'), tr('col_bpm'), tr('col_key'),
+            tr('col_camelot'), tr('col_ai'), tr('col_style'), tr('col_harmonic'),
+            tr('col_content'), tr('col_match')
+        ]
+
     def _setup_table(self):
         """Configure table appearance and behavior."""
         # Set columns
-        self.setColumnCount(len(self.COLUMNS))
-        self.setHorizontalHeaderLabels(self.COLUMNS)
+        headers = self._get_column_headers()
+        self.setColumnCount(len(headers))
+        self.setHorizontalHeaderLabels(headers)
 
         # Appearance
         self.setAlternatingRowColors(True)
@@ -95,6 +108,7 @@ class TrackTable(QTableWidget):
         self.verticalHeader().setVisible(False)
         self.setShowGrid(False)
 
+
         # Column sizing
         header = self.horizontalHeader()
         header.setSectionResizeMode(self.COL_NAME, QHeaderView.Stretch)
@@ -102,6 +116,8 @@ class TrackTable(QTableWidget):
         header.setSectionResizeMode(self.COL_BPM, QHeaderView.ResizeToContents)
         header.setSectionResizeMode(self.COL_KEY, QHeaderView.ResizeToContents)
         header.setSectionResizeMode(self.COL_CAMELOT, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(self.COL_AI, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(self.COL_STYLE, QHeaderView.ResizeToContents)
         header.setSectionResizeMode(self.COL_COMPAT, QHeaderView.ResizeToContents)
         header.setSectionResizeMode(self.COL_CONTENT, QHeaderView.ResizeToContents)
         header.setSectionResizeMode(self.COL_COMBINED, QHeaderView.ResizeToContents)
@@ -137,7 +153,10 @@ class TrackTable(QTableWidget):
         """Add a row for a track."""
         row = self.rowCount()
         self.insertRow(row)
+        self._populate_row(row, track)
 
+    def _populate_row(self, row: int, track: Track):
+        """Populate a row with track data."""
         # Store track reference in first cell
         name_item = QTableWidgetItem(track.filename)
         name_item.setData(Qt.UserRole, track)
@@ -148,6 +167,14 @@ class TrackTable(QTableWidget):
         self.setItem(row, self.COL_BPM, QTableWidgetItem(track.bpm_str))
         self.setItem(row, self.COL_KEY, QTableWidgetItem(track.key or '--'))
         self.setItem(row, self.COL_CAMELOT, QTableWidgetItem(track.camelot_str))
+
+        # AI analysis indicator
+        ai_item = QTableWidgetItem('✓' if track.embedding is not None else '')
+        ai_item.setTextAlignment(Qt.AlignCenter)
+        self.setItem(row, self.COL_AI, ai_item)
+
+        # Style column
+        self.setItem(row, self.COL_STYLE, QTableWidgetItem(track.style_str))
 
         # Harmonic compatibility column
         self.setItem(row, self.COL_COMPAT, QTableWidgetItem(track.compatibility_str))
@@ -177,6 +204,8 @@ class TrackTable(QTableWidget):
         self.item(row, self.COL_BPM).setText(track.bpm_str)
         self.item(row, self.COL_KEY).setText(track.key or '--')
         self.item(row, self.COL_CAMELOT).setText(track.camelot_str)
+        self.item(row, self.COL_AI).setText('✓' if track.embedding is not None else '')
+        self.item(row, self.COL_STYLE).setText(track.style_str)
         self.item(row, self.COL_COMPAT).setText(track.compatibility_str)
         self.item(row, self.COL_CONTENT).setText(track.content_str)
 
@@ -285,50 +314,57 @@ class TrackTable(QTableWidget):
         menu = QMenu(self)
 
         # Set as master
-        master_action = QAction("Set as Master Track", self)
+        master_action = QAction(tr('set_as_master'), self)
         master_action.triggered.connect(lambda: self.master_track_changed.emit(track))
         menu.addAction(master_action)
 
         # Play
-        play_action = QAction("Play", self)
+        play_action = QAction(tr('play'), self)
         play_action.triggered.connect(lambda: self.play_requested.emit(track))
         menu.addAction(play_action)
 
         # Reanalyze
-        reanalyze_action = QAction("Reanalyze Track", self)
+        reanalyze_action = QAction(tr('reanalyze_track'), self)
         reanalyze_action.triggered.connect(lambda: self.reanalyze_requested.emit(track))
         menu.addAction(reanalyze_action)
 
         # AI Content Analysis
         if track.has_embedding:
-            content_action = QAction("✓ Content Analyzed (AI)", self)
-            content_action.setEnabled(False)
+            content_action = QAction(tr('reanalyze_content_ai'), self)
         else:
-            content_action = QAction("Analyze Content (AI)", self)
-            content_action.triggered.connect(lambda: self.content_analyze_requested.emit(track))
+            content_action = QAction(tr('analyze_content_ai'), self)
+        content_action.triggered.connect(lambda: self.content_analyze_requested.emit(track))
         menu.addAction(content_action)
 
         menu.addSeparator()
 
+        # Edit Metadata (only for MP3 files)
+        if track.file_path.suffix.lower() == '.mp3':
+            edit_meta_action = QAction(tr('edit_metadata'), self)
+            edit_meta_action.triggered.connect(lambda: self.edit_metadata_requested.emit(track))
+            menu.addAction(edit_meta_action)
+
+        menu.addSeparator()
+
         # BPM multiplier submenu
-        bpm_menu = menu.addMenu("BPM Multiplier")
+        bpm_menu = menu.addMenu(tr('bpm_multiplier'))
 
         # x0.5 option
-        half_action = QAction("x0.5 (Half)", self)
+        half_action = QAction(tr('half'), self)
         half_action.setCheckable(True)
         half_action.setChecked(track.bpm_multiplier == 0.5)
         half_action.triggered.connect(lambda: self._set_bpm_multiplier(track, 0.5))
         bpm_menu.addAction(half_action)
 
         # x1 option (original)
-        normal_action = QAction("x1 (Original)", self)
+        normal_action = QAction(tr('original'), self)
         normal_action.setCheckable(True)
         normal_action.setChecked(track.bpm_multiplier == 1.0)
         normal_action.triggered.connect(lambda: self._set_bpm_multiplier(track, 1.0))
         bpm_menu.addAction(normal_action)
 
         # x2 option
-        double_action = QAction("x2 (Double)", self)
+        double_action = QAction(tr('double'), self)
         double_action.setCheckable(True)
         double_action.setChecked(track.bpm_multiplier == 2.0)
         double_action.triggered.connect(lambda: self._set_bpm_multiplier(track, 2.0))
@@ -337,14 +373,14 @@ class TrackTable(QTableWidget):
         # Show current effective BPM
         if track.bpm:
             bpm_menu.addSeparator()
-            info_action = QAction(f"Original: {track.original_bpm_str} BPM", self)
+            info_action = QAction(tr('original_bpm', bpm=track.original_bpm_str), self)
             info_action.setEnabled(False)
             bpm_menu.addAction(info_action)
 
         menu.addSeparator()
 
         # Remove
-        remove_action = QAction("Remove", self)
+        remove_action = QAction(tr('remove'), self)
         remove_action.triggered.connect(self.remove_selected_track)
         menu.addAction(remove_action)
 

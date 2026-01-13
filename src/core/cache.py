@@ -73,6 +73,11 @@ class TrackCache:
             conn.execute("ALTER TABLE track_cache ADD COLUMN embedding BLOB")
             conn.commit()
 
+        # Migration: add style column for AI-detected style
+        if 'style' not in columns:
+            conn.execute("ALTER TABLE track_cache ADD COLUMN style TEXT")
+            conn.commit()
+
     @contextmanager
     def _get_connection(self):
         """Get database connection with context manager."""
@@ -252,6 +257,51 @@ class TrackCache:
 
         return None
 
+    def save_style(self, file_path: Path, style: str):
+        """
+        Save AI-detected style for a track.
+
+        Args:
+            file_path: Path to the audio file
+            style: Style string (e.g., "Drum And Bass / Energetic")
+        """
+        file_path = Path(file_path).absolute()
+
+        with self._get_connection() as conn:
+            conn.execute(
+                """
+                UPDATE track_cache
+                SET style = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE file_path = ?
+                """,
+                (style, str(file_path))
+            )
+            conn.commit()
+
+    def get_style(self, file_path: Path) -> Optional[str]:
+        """
+        Get cached style for a file.
+
+        Args:
+            file_path: Path to the audio file
+
+        Returns:
+            Style string or None if not cached
+        """
+        file_path = Path(file_path).absolute()
+
+        with self._get_connection() as conn:
+            cursor = conn.execute(
+                "SELECT style FROM track_cache WHERE file_path = ?",
+                (str(file_path),)
+            )
+            row = cursor.fetchone()
+
+            if row and row['style']:
+                return row['style']
+
+        return None
+
     def get_all_embeddings(self) -> Dict[str, np.ndarray]:
         """
         Get all cached embeddings.
@@ -271,6 +321,26 @@ class TrackCache:
                 )
 
         return embeddings
+
+    def clear_ai_data(self, file_path: Path):
+        """
+        Clear AI analysis data (embedding and style) for a file without removing basic analysis.
+
+        Args:
+            file_path: Path to the audio file
+        """
+        file_path = Path(file_path).absolute()
+
+        with self._get_connection() as conn:
+            conn.execute(
+                """
+                UPDATE track_cache
+                SET embedding = NULL, style = NULL, updated_at = CURRENT_TIMESTAMP
+                WHERE file_path = ?
+                """,
+                (str(file_path),)
+            )
+            conn.commit()
 
     def invalidate(self, file_path: Path):
         """

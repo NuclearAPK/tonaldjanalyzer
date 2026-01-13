@@ -8,7 +8,7 @@ import numpy as np
 BPM_MULTIPLIERS = [0.5, 1.0, 2.0]
 
 
-@dataclass
+@dataclass(eq=False)
 class Track:
     """Represents an audio track with its metadata and analysis results."""
 
@@ -23,6 +23,9 @@ class Track:
     content_score: Optional[float] = None  # 0-100 (content similarity)
     combined_score: Optional[float] = None  # 0-100 (overall match)
     embedding: Optional[np.ndarray] = field(default=None, repr=False)  # Audio embedding
+    genre: Optional[str] = None  # Genre (from metadata or AI)
+    mood: Optional[str] = None  # Mood/character (from AI)
+    genre_from_metadata: bool = False  # True if genre came from file metadata
     is_master: bool = False
     is_analyzed: bool = False
     error: Optional[str] = None
@@ -31,6 +34,16 @@ class Track:
         if isinstance(self.file_path, str):
             self.file_path = Path(self.file_path)
         self.filename = self.file_path.name
+
+    def __eq__(self, other):
+        """Compare tracks by file path only."""
+        if not isinstance(other, Track):
+            return False
+        return self.file_path == other.file_path
+
+    def __hash__(self):
+        """Hash by file path for use in sets/dicts."""
+        return hash(self.file_path)
 
     @property
     def duration_str(self) -> str:
@@ -107,6 +120,37 @@ class Track:
     def has_embedding(self) -> bool:
         """Check if embedding is available."""
         return self.embedding is not None
+
+    @property
+    def style_str(self) -> str:
+        """Returns combined genre/mood style string."""
+        if self.genre and self.mood:
+            return f"{self.genre} / {self.mood}"
+        elif self.genre:
+            return self.genre
+        elif self.mood:
+            return f"-- / {self.mood}"
+        return "--"
+
+    @property
+    def style(self) -> Optional[str]:
+        """Returns full style string for compatibility."""
+        if self.genre or self.mood:
+            return self.style_str
+        return None
+
+    @style.setter
+    def style(self, value: Optional[str]):
+        """Parse style string into genre and mood (for backward compatibility)."""
+        if value is None:
+            return
+        if " / " in value:
+            parts = value.split(" / ", 1)
+            if not self.genre_from_metadata:  # Don't overwrite metadata genre
+                self.genre = parts[0]
+            self.mood = parts[1]
+        elif not self.genre_from_metadata:
+            self.genre = value
 
     def reset_compatibility(self):
         """Reset compatibility scores (used when master track changes)."""
