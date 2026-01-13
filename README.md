@@ -1,12 +1,19 @@
-# Tonal DJ - Track Compatibility Analyzer
+# Tonal DJ - AI-Powered Track Compatibility Analyzer
 
 [Русская версия](README_RU.md)
 
-A desktop application for DJs that analyzes audio tracks and finds compatible matches based on musical key (Camelot Wheel notation) and BPM for seamless mixing.
+A desktop application for DJs that uses **AI-powered audio analysis** to find compatible tracks based on musical content, key, and BPM for seamless mixing.
 
 ![Tonal DJ Screenshot](assets/main.png)
 
-## Features
+## AI Features
+
+- **Content-Based Matching** - Uses CLAP (Contrastive Language-Audio Pretraining) neural network to analyze audio content and find sonically similar tracks
+- **AI Genre Classification** - Automatic genre detection (Drum & Bass, House, Techno, Dubstep, Trance, etc.)
+- **AI Mood Detection** - Classifies track mood (Energetic, Dark, Melodic, Aggressive, Uplifting, etc.)
+- **Combined Scoring** - Intelligent combination of harmonic compatibility and content similarity
+
+## Core Features
 
 - **BPM Detection** - Automatic tempo detection using beat tracking
 - **Key Detection** - Musical key detection using Krumhansl-Schmuckler algorithm
@@ -16,6 +23,7 @@ A desktop application for DJs that analyzes audio tracks and finds compatible ma
 - **MP3 Metadata** - Read/write analysis results to MP3 ID3 tags
 - **Local Cache** - SQLite database for fast loading of previously analyzed tracks
 - **Audio Playback** - Built-in player to preview tracks
+- **Multi-language** - English and Russian interface
 - **Drag & Drop** - Easy file loading
 - **CSV Export** - Export track list with compatibility data
 
@@ -23,8 +31,8 @@ A desktop application for DJs that analyzes audio tracks and finds compatible ma
 
 1. Clone the repository:
 ```bash
-git clone https://github.com/yourusername/TonalDJPlugin.git
-cd TonalDJPlugin
+git clone https://github.com/NuclearAPK/tonaldjanalyzer.git
+cd tonaldjanalyzer
 ```
 
 2. Install dependencies:
@@ -41,38 +49,34 @@ python main.py
 
 - Python 3.8+
 - PyQt5
+- PyTorch
+- Transformers (for CLAP model)
 - librosa
-- numpy
-- scipy
-- soundfile
-- pygame
+- numpy, scipy
+- soundfile, pygame
 - mutagen
 
 ## Usage
 
-1. **Load Tracks** - Click "Load Tracks" or drag & drop audio files (MP3, WAV, FLAC, OGG, M4A)
-2. **Set Master Track** - Select a track and click "Set as Master" or use context menu
-3. **View Compatibility** - All tracks will show compatibility percentage with the master track
-4. **Sort by Match** - Click "Sort by Match" to order tracks by compatibility (toggle ascending/descending)
-5. **Adjust BPM** - Right-click on a track to set BPM multiplier (x0.5, x1, x2) for tempo matching
-6. **Play Tracks** - Double-click or use context menu to preview tracks
-7. **Export** - Click "Export CSV" to save the analysis results
+1. **Load Tracks** - Click "Load Tracks" or drag & drop audio files
+2. **Set Master Track** - Select a track and click "Set as Master"
+3. **AI Analysis** - Click "Analyze AI" to run content analysis on all tracks
+4. **View Compatibility** - All tracks show combined compatibility (harmonic + content)
+5. **Sort by Match** - Click "Sort Match" to order tracks by compatibility
+6. **Adjust BPM** - Right-click to set BPM multiplier (x0.5, x1, x2)
+7. **Export** - Click "Export CSV" to save results
 
-## Camelot Wheel
+## How AI Matching Works
 
-The Camelot Wheel is a tool that helps DJs mix tracks harmonically. Compatible keys are:
-- Same key (e.g., 8A to 8A)
-- Adjacent numbers (e.g., 8A to 7A or 9A)
-- Same number, different letter (e.g., 8A to 8B - relative major/minor)
+The CLAP model creates audio embeddings (512-dimensional vectors) that capture the sonic characteristics of each track. When you set a master track, the app calculates cosine similarity between embeddings to find tracks that sound similar - regardless of key or BPM.
+
+The final **Match** score combines:
+- **Harmonic compatibility** (key/Camelot matching)
+- **Content similarity** (AI-based audio analysis)
 
 ## Supported Audio Formats
 
-- MP3
-- WAV
-- FLAC
-- OGG
-- M4A
-- AAC
+MP3, WAV, FLAC, OGG, M4A, AAC
 
 ## License
 
